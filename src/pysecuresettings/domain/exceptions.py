@@ -1,0 +1,2 @@
+class FailedToLoadFromEnvVariable(Exception):
+    pass
