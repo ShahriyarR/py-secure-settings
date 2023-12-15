@@ -1,0 +1,334 @@
+import json
+import pickle
+
+import pytest
+from readonce import UnsupportedOperationException
+
+from pysecuresettings.domain.model import Secret
+
+
+def test_finalized_class_can_not_be_subclassed():
+    with pytest.raises(TypeError):
+
+        class TryPassword(Secret):
+            ...
+
+
+def test_secret_read_only_once(get_secret_object):
+    password_ = get_secret_object.get_secret()
+
+    assert password_ == "awesome_pass"
+
+    with pytest.raises(UnsupportedOperationException):
+        # Can not read password twice, because it is already consumed
+        get_secret_object.get_secret()
+
+
+def test_if_can_pickle_the_secret_class(get_secret_object):
+    with pytest.raises(UnsupportedOperationException):
+        pickle.dumps(get_secret_object)
+
+
+def test_direct_secrets_access_is_empty_list(get_secret_object):
+    assert get_secret_object.secrets == []
+    assert get_secret_object.secrets_ == []
+
+
+def test_direct_access_to_is_consumed_field(get_secret_object):
+    assert get_secret_object.is_consumed is None
+    assert get_secret_object.is_consumed_ is None
+
+    with pytest.raises(UnsupportedOperationException):
+        get_secret_object.is_consumed_ = True
+
+    with pytest.raises(UnsupportedOperationException):
+        get_secret_object.update_is_consumed()
+
+
+def test_direct_reset_is_consumed_call(get_secret_object):
+    with pytest.raises(UnsupportedOperationException):
+        get_secret_object.reset_is_consumed()
+
+
+def test_direct_reset_secrets_call(get_secret_object):
+    with pytest.raises(UnsupportedOperationException):
+        get_secret_object.reset_secrets()
+
+
+def test_sensitive_class_dict_is_empty(get_secret_object):
+    assert get_secret_object.__dict__() == {}
+
+
+def test_sensitive_class_dir_output_is_empty(get_secret_object):
+    assert not dir(get_secret_object)
+    assert get_secret_object.__dir__() == []
+
+
+def test_sensitive_class_super_class_secrets_is_empty(get_secret_object):
+    assert get_secret_object.secrets_ == []
+    assert get_secret_object.secrets == []
+
+
+def test_len_of_secrets(get_secret_object):
+    assert len(get_secret_object) == 1
+    pass_ = get_secret_object.get_secret()
+    assert len(get_secret_object) == 0
+    assert pass_ == "awesome_pass"
+    with pytest.raises(UnsupportedOperationException):
+        # Can not read password twice, because it is already consumed
+        get_secret_object.get_secret()
+
+
+def test_if_several_secrets_can_be_added(get_secret_object):
+    get_secret_object.add_secret("new_secret")
+    get_secret_object.add_secret("new_secret2")
+    assert len(get_secret_object) == 1
+    # If the secret was updated we store only latest
+    assert get_secret_object.get_secret() == "new_secret2"
+
+
+def test_if_sensitive_object_can_be_used_after_consuming(get_secret_object):
+    get_secret_object.get_secret()
+    # It should fail to add new secret after consuming old one. Why?
+    # Imagine you can read password then add back to secret then read it again???
+    with pytest.raises(UnsupportedOperationException):
+        get_secret_object.add_secret("new_secret")
+
+
+#
+#
+def test_if_class_str_and_repr_exposes_secrets(get_secret_object):
+    assert get_secret_object.__str__() == "<Secret> for User Password"
+    assert get_secret_object.__repr__() == "<Secret> for User Password"
+
+
+def test_if_sensitive_object_is_serializable(get_secret_object, get_custom_secret_encoder):
+    # With custom encoder
+    with pytest.raises(UnsupportedOperationException):
+        json.dumps(get_secret_object, cls=get_custom_secret_encoder)
+
+    # Without custom encoder
+    with pytest.raises(TypeError):
+        json.dumps(get_secret_object)
+
+
+def test_if_secret_can_be_used_as_dataclass_field(get_db_password_dataclass):
+    password = get_db_password_dataclass.password.get_secret()
+    assert password == "awesome_pass"
+
+
+#
+#
+# def test_use_sensitive_class_as_descriptor(get_db_credentials_with_desc_obj):
+#     db_port = get_db_credentials_with_desc_obj.port
+#     # Integers are converted to strings
+#     assert db_port.get_secret() == "3306"
+#     db_uri = get_db_credentials_with_desc_obj.uri
+#     assert db_uri.get_secret() == "mysql://"
+#
+#     assert (
+#         get_db_credentials_with_desc_obj.__str__()
+#         == "DBCredentialsWithDescriptors(password=ReadOnce[secrets=*****], uri=ReadOnce[secrets=*****], port=ReadOnce[secrets=*****], host=ReadOnce[secrets=*****])"
+#     )
+#     # Again can not be read twice
+#     with pytest.raises(UnsupportedOperationException):
+#         db_uri.get_secret()
+#
+#
+# def test_use_sensitive_data_class(
+#     get_db_credentials_class,
+#     get_password_class,
+#     get_db_host_class,
+#     get_db_uri_class,
+#     get_db_port,
+#     get_custom_db_credentials_encoder,
+# ):
+#     credentials = get_db_credentials_class(
+#         password=get_password_class("db-password"),
+#         uri=get_db_uri_class("mysql://"),
+#         host=get_db_host_class("localhost"),
+#         port=get_db_port(3306),
+#     )
+#     # Credentials are not exposed if somebody tries to log
+#     assert (
+#         credentials.__str__()
+#         == "DBCredentials(password=ReadOnce[secrets=*****], uri=ReadOnce[secrets=*****], port=ReadOnce[secrets=*****], "
+#         "host=ReadOnce[secrets=*****])"
+#     )
+#
+#     assert credentials.password.get_secret() == "db-password"
+#
+#     with pytest.raises(TypeError):
+#         json.dumps(credentials)
+#
+#     # With custom encoder
+#     with pytest.raises(UnsupportedOperationException):
+#         json.dumps(credentials, cls=get_custom_db_credentials_encoder)
+#
+#     with pytest.raises(TypeError):
+#         json.dumps(credentials.uri)
+#
+#     # Can not be pickled
+#     with pytest.raises(UnsupportedOperationException):
+#         pickle.dumps(credentials)
+#
+#     # Again can not be read twice
+#     with pytest.raises(UnsupportedOperationException):
+#         credentials.password.get_secret()
+#
+#
+# def test_use_sensitive_data_pydantic_model(
+#     get_db_credentials_model,
+#     get_password_class,
+#     get_db_host_class,
+#     get_db_uri_class,
+#     get_db_port,
+# ):
+#     credentials = get_db_credentials_model(
+#         comment="The Hacked Database",
+#         password=get_password_class("db-password"),
+#         uri=get_db_uri_class("mysql://"),
+#         host=get_db_host_class("localhost"),
+#         port=get_db_port(3306),
+#     )
+#     assert credentials.password.get_secret() == "db-password"
+#
+#
+# def test_use_invalid_sensitive_data_pydantic_model(
+#     get_invalid_db_credentials_model,
+#     get_password_class,
+#     get_db_host_class,
+#     get_db_uri_class,
+#     get_db_port,
+# ):
+#     with pytest.raises(UnsupportedOperationException):
+#         get_invalid_db_credentials_model(
+#             comment="The Hacked Database",
+#             password=get_password_class("db-password"),  # valid length password
+#             uri=get_db_uri_class("mysql://"),
+#             host=get_db_host_class("localhost"),
+#             port=get_db_port(3306),
+#         )
+#
+#
+# def test_monkeypatch_get_secret(get_secret_object, monkeypatch):
+#     def mock_return():
+#         return "12345"
+#
+#     get_secret_object.add_secret("new_secret")
+#     with pytest.raises(UnsupportedOperationException):
+#         with monkeypatch.context() as m:
+#             m.setattr(get_secret_object, "get_secret", mock_return)
+#     # the original secret was not affected
+#     assert get_secret_object.get_secret() != mock_return()
+#
+#
+# def test_monkeypatch_add_secret(get_secret_object, monkeypatch):
+#     def mock_return():
+#         return "12345"
+#
+#     # basically has no effect on add_secret
+#     with pytest.raises(UnsupportedOperationException):
+#         with monkeypatch.context() as m:
+#             m.setattr(get_secret_object, "add_secret", mock_return)
+#     get_secret_object.add_secret("fake")
+#
+#     with pytest.raises(UnsupportedOperationException):
+#         with monkeypatch.context() as m:
+#             m.setattr(get_secret_object, "get_secret", mock_return)
+#     # the original secret was not affected
+#     assert get_secret_object.get_secret() != mock_return()
+#
+#
+# def test_monkeypatch_change_secrets_property(get_secret_object, monkeypatch):
+#     # It has no effect either for the secrets property
+#     with pytest.raises(AttributeError):
+#         with monkeypatch.context() as m:
+#             m.setattr(get_secret_object, "secrets", ["12345"])
+#     # Still original secret is there
+#     assert get_secret_object.get_secret() != "12345"
+#
+#
+# def test_monkeypatch_change_secrets_storage(get_secret_object, monkeypatch):
+#     # Directly trying to monkeypatch will raise double UnsupportedOperationException;
+#     # As monkeypatch in its default undo() section tries to again edit "_ReadOnce__secrets" which raises same exception
+#     # That's why we use context() below
+#
+#     # with pytest.raises(UnsupportedOperationException):
+#     #     monkeypatch.setattr(get_secret_object, "_ReadOnce__secrets", ["12345"], raising=False)
+#
+#     with pytest.raises(UnsupportedOperationException):
+#         with monkeypatch.context() as m:
+#             m.setattr(get_secret_object, "secrets_", ["12345"], raising=True)
+#
+#
+# def test_direct_access_to_key_field(get_secret_object):
+#     assert get_secret_object.key is None
+#     assert get_secret_object.key_ is None
+#
+#     with pytest.raises(UnsupportedOperationException):
+#         get_secret_object.key_ = b"new key"
+#
+#     with pytest.raises(UnsupportedOperationException):
+#         get_secret_object.update_key(b"new key")
+#
+#     with pytest.raises(UnsupportedOperationException):
+#         get_secret_object.reset_key()
+#
+#
+# def test_monkeypatch_the_key(get_secret_object, monkeypatch):
+#     get_secret_object.add_secret("new_secret")
+#
+#     with pytest.raises(UnsupportedOperationException):
+#         with monkeypatch.context() as m:
+#             m.setattr(get_secret_object, "key_", None)
+#
+#
+# def test_if_can_create_and_consume_same_secret_multiple_times(get_secret_object):
+#     get_secret_object.add_secret("new_secret")
+#     pass_1 = Password("new_secret")
+#     pass_2 = Password("new_secret")
+#
+#     assert pass_1 is not pass_2
+#     assert pass_1 != pass_2
+#     assert get_secret_object.get_secret() == pass_1.get_secret() == pass_2.get_secret()
+#
+#
+# # YAML tests
+#
+#
+# def test_if_can_be_serialized_using_yaml(get_secret_object):
+#     data_ = {"test": "data", "c": get_secret_object}
+#     # and it is impossible
+#     with pytest.raises(UnsupportedOperationException):
+#         yaml.dump(data_)
+#
+#
+# def test_if_can_be_serialized_inside_the_list(get_secret_object):
+#     data = [get_secret_object, Password("new_password")]
+#     # and it is impossible
+#     with pytest.raises(UnsupportedOperationException):
+#         with open("users.yml", "w") as f:
+#             yaml.dump(data, f)
+#
+#
+# def test_if_can_be_serialized_with_attrs(get_attrs_password):
+#     # and it is impossible
+#     with pytest.raises(UnsupportedOperationException):
+#         yaml.dump(get_attrs_password)
+#
+#
+# # CSV tests
+#
+# def test_if_can_be_serialized_using_csv(get_secret_object):
+#     from dataclasses import dataclass, asdict
+#
+#     @dataclass
+#     class Data:
+#         password: Password
+#
+#     data = asdict(Data(password=get_secret_object))
+#     print(data)
+#
+#     import csv
+#     csv.Dialect()
